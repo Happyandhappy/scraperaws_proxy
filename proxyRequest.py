@@ -1,10 +1,7 @@
 from proxy_custom_requests import ProxyRequests
 from bs4 import BeautifulSoup
 import re, os, csv, math
-import threading
 import pandas as pd
-import uuid
-import datetime
 
 class ScrapingUnit():
 
@@ -22,40 +19,29 @@ class ScrapingUnit():
             lists.append(key[0])
         self.ASINs = lists
 
-    def getPrice(self, soup):
-        span = soup.find('span', id='priceblock_ourprice')
-        price = span.text.lstrip().rstrip() if span else ""
-        if price == "":
-            div = soup.find('div', id='olp-upd-new')
-            div = soup.find('div', id='olp-upd-new-used') if div is None else div
-            priceText = div.text.lstrip().rstrip() if div else ""
-            price = priceText.split(" ")[len(priceText.split(" "))-1]
-        if price == "":
-            priceSpan = soup.find('span', {'class': 'a-color-price'})
-            if priceSpan:
-                price = priceSpan.text.lstrip().rstrip()
-        return price
+    def getPrice_Seller(self, soup):
+        divs   = soup.find_all('div', {'class' : 'a-row a-spacing-mini olpOffer'})
+        price  = ''
+        seller = 'amazon.com'
+        if divs:
+            for dv in divs:
+                div = dv
+                break
+            pricediv = div.find('span', {'class' : 'a-size-large a-color-price olpOfferPrice a-text-bold'})
+            price = pricediv.text.lstrip().rstrip() if pricediv else ''
+            sellerdiv = div.find('div',{'class' : 'a-column a-span2 olpSellerColumn'})
+            seller = sellerdiv.find('a').text.lstrip().rstrip() if sellerdiv and sellerdiv.find('a') else 'amazon.com'
+        seller = seller.lstrip().rstrip()
+        seller = 'amazon.com' if seller == '' else seller
+        return price, seller
 
     def getsize(self, soup):
-        try:
-            sizeSpan = soup.find(id='shelf-label-size_name').find('span',{'class':'shelf-label-variant-name'})
-            size = sizeSpan.text.rstrip().lstrip() if sizeSpan else ""
-        except:
-            size=""
-        if size == "":
-            div = soup.find('div', {'class' :  'disclaim'})
-            sizeText = div.text.lstrip().rstrip().split("|")[0] if div else ""
-            size = sizeText.split(":")[1] if sizeText != "" and "size" in sizeText.lower() else ""
-        if size == "" :
-            sizeSpan = soup.find('li',{'class':'swatchSelect'})
-            size = sizeSpan.find('span', {'class' : 'a-size-base'}).text.rstrip().lstrip() if sizeSpan and sizeSpan.find('span', {'class' : 'a-size-base'}) else ""
-        if size=="":
-            table = soup.find(id='productDetails_techSpec_section_1')
-            trs = table.find_all('tr') if table else []
-            for tr in trs:
-                header = tr.find('th').text.lstrip().rstrip() if tr.find('th') else ''
-                if header=='Size':
-                    size = tr.find('td').text if tr.find('td') else ''
+        size = ""
+        sizeDivs = soup.find_all('div', {'class': 'a-section a-spacing-micro'})
+        if sizeDivs:
+            for div in sizeDivs:
+                if 'Size:' in div.text:
+                    size = div.text.replace('Size:','')
         return size.lstrip().rstrip()
 
     def getListfromDropdown(self, soup):
@@ -76,55 +62,82 @@ class ScrapingUnit():
                 pass
         return list
 
+    # .encode('utf-8')
     def export(self, imasin, asin, title, size ,price, seller):
         header = ['Imported ASIN', 'ASIN', 'Title', 'Size Variation', 'Price','Seller'] if not os.path.exists(self.csv) else None
         row = [imasin, asin, title, size, price, seller]
-        file = open(self.csv, 'a', newline='')
+        file = open(self.csv, 'a')
         with file:
             writer = csv.writer(file)
             writer.writerow(header) if header else None
             writer.writerow(row)
         file.close()
 
-    def Unit(self, imasin, asin, first=False):
-        self.request.url = "https://www.amazon.com/gp/product/%s?th=1&psc=1" %(asin)
+    def getAsinList(self, imasin):
+        self.request.url = "https://www.amazon.com/gp/product/%s?th=1" % (imasin)
+        print(self.request.url)
+        self.request.get()
+        soup = BeautifulSoup(re.findall('<html(.*?)</html>', self.request.raw_content, re.DOTALL)[0], "lxml")
+        asinlist = [imasin]
+        """ First case """ #https://www.amazon.com/gp/product/B01D8F5NDM?th=1
+        form = soup.find(id='twisterContainer')
+        if form:
+            for div in form.find_all('div'):
+                try:
+                    datadpurl = div['data-dp-url'] if div['data-dp-url'] else None
+                    asinlist.append(datadpurl.split('/')[2].lstrip().rstrip()) if datadpurl else None
+                except:
+                    continue
+
+            for div in form.find_all('li'):
+                try:
+                    datadpurl = div['data-dp-url'] if div['data-dp-url'] else None
+                    asinlist.append(datadpurl.split('/')[2].lstrip().rstrip()) if datadpurl else None
+                except:
+                    continue
+
+            for option in form.find_all('option', {'class' : 'dropdownAvailable'}):
+                try:
+                    value = option['value'].lstrip().rstrip() if option['value'] != '-1' else ''
+                    list.append(value.split(',')[1]) if value != '' else None
+                except:
+                    pass
+            print asinlist
+        return asinlist
+
+    def Unit(self, imasin, asin):
+        self.request.url = "https://www.amazon.com/gp/offer-listing/%s" %(asin)
         print(self.request.url)
         self.request.get()
 
+        if self.request.raw_content == '':
+            self.export(imasin, asin, 'Sorry! Something went wrong!', '', '', '')
+            return
+
         soup =BeautifulSoup(re.findall('<html(.*?)</html>', self.request.raw_content, re.DOTALL)[0], "lxml")
-        productTitle = soup.find(id="productTitle").text.lstrip().rstrip()
-        asinlist = []   #Asin list
-        if first:
-            sizesDiv = soup.find(id='native_dropdown_selected_size_name')
-            if sizesDiv:
-                asinlist = self.getListfromDropdown(sizesDiv)
-            else:
-                sizesDiv = soup.find(id='shelfSwatchSection-size_name')
-                if sizesDiv:
-                    asinlist = self.getListfromEle(sizesDiv)
-                else:
-                    div = soup.find(id='variation_size_name')
-                    sizesDiv = div.find('ul') if div else None
-                    if sizesDiv:
-                        asinlist = self.getListfromEle(sizesDiv)
-                    else:
-                        div = soup.find(id='variation_color_name')
-                        sizesDiv = div.find('ul') if div else None
-                        if sizesDiv:
-                            asinlist = self.getListfromEle(sizesDiv)
+        try:
+            productTitle = soup.find('h1',{'class': "a-size-large a-spacing-none"}).text.encode('utf-8').lstrip().rstrip()
+        except:
+            productTitle = ""
+
         """ get size data """
-        size = self.getsize(soup)
+        size = self.getsize(soup).encode('utf-8')
+        print(size)
         """ get price data """
-        price = self.getPrice(soup)
-        self.export(imasin, asin, productTitle, size, price, "seller")
-        return [asin] + asinlist
+        price, seller = self.getPrice_Seller(soup)
+        price = price.encode('utf-8')
+        seller = seller.encode('utf-8')
+
+        print(price + ":" + seller)
+        self.export(imasin, asin, productTitle, size, price, seller)
 
     def process(self):
         self.readExcel()
         for imasin in self.ASINs:
-            asinList = self.Unit(imasin, imasin, True)
-            for asin in asinList[1:]:
-                self.Unit(imasin, asin)
+            imasin = imasin.encode('utf-8')
+            asinList = self.getAsinList(imasin)
+            for asin in asinList:
+                self.Unit(imasin, asin.encode('utf-8'))
 
     # devide tagets to multi threads
     def getRangesByThreads(self, threads, start, end):

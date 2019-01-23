@@ -2,3 +2,6 @@ lxml
 pandas
 BeautifulSoup4
 apscheduler==2.1.2
+urllib3
+flask
+xlrd

@@ -1,4 +1,5 @@
-static/result
+static/result/*.csv
+%.csv
 .idea/
 py3env/
 .env

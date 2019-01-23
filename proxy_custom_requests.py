@@ -22,6 +22,7 @@ class ProxyRequests:
             if i.xpath('.//td[7][contains(text(),"yes")]'):
                 proxy = ":".join([i.xpath('.//td[1]/text()')[0], i.xpath('.//td[2]/text()')[0]])
                 self.sockets.append(proxy)
+        self.try_count = len(self.sockets)
 
     def __try_count_succeeded(self):
         message = "Unable to make proxied request. "
@@ -35,6 +36,7 @@ class ProxyRequests:
 
     # recursively try proxy sockets until successful GET
     def get(self):
+        self.raw_content = ''
         while len(self.sockets) > 0 and self.try_count > 0:
             if len(self.sockets) < 10:
                 self.__acquire_sockets()
@@ -53,6 +55,9 @@ class ProxyRequests:
                     headers=self.headers
                 )
                 soup = BeautifulSoup(request.text, "html.parser")
+                if soup.find('title') == None or soup.find('title').text=='Amazon.com Page Not Found':
+                    break
+
                 if soup.find('title').text == 'Robot Check' or soup.find('title').text == 'Sorry! Something went wrong!':
                     self.current_socket = self.sockets.pop(0)
                     self.try_count -= 1
